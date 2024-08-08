@@ -1,28 +1,23 @@
 library(shiny)
-library(shinyjs)
 library(RSQLite)
-library(DBI)
-library(dplyr)
-library(dbplyr)
 library(sodium)
 library(glue)
 library(shinyalert)
-library(reticulate)
 
-source("utils.R")
+account_creation <- function(username, password){
+  conn <- dbConnect(RSQLite::SQLite(), dbname = "MTG.db")
 
-# Python part
-use_python("/opt/homebrew/bin/python3", required = TRUE)
-oracledb <- import("oracledb")
-pd <- import("pandas")
-
-account_creation <- function(username, password, DB_username, DB_password, DB_dsn){
-  conn <- oracledb$connect(user = DB_username, password = DB_password, dsn = DB_dsn)
-  cursor <- conn$cursor()
-
+  dbExecute(conn, glue("
+    CREATE TABLE IF NOT EXISTS mtg_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username VARCHAR NOT NULL,
+      username_hash BLOB NOT NULL,
+      password_hash BLOB NOT NULL
+      )
+    "))
+  
   query <- "SELECT COUNT(*) as count FROM mtg_users WHERE username = ?"
-  cursor$execute(query, list(username = username))
-  result <- cursor$fetchone()
+  result <- dbGetQuery(conn, query, params = list(username))
   
   if (result$count > 0) {
     shinyalert("Account already exists", "The account for this username already exists.", type = "error")
@@ -38,8 +33,8 @@ account_creation <- function(username, password, DB_username, DB_password, DB_ds
   dbDisconnect(conn)
 }
 
-login <- function(username, password,DB_username,DB_password,DB_dsn){
-  conn <- oracledb$connect(user = DBusername, DBpassword = DBpassword, dsn = DBdsn)
+login <- function(username, password){
+  conn <- dbConnect(RSQLite::SQLite(), dbname = "MTG.db")
   
   # Retrieve the stored hashes
   query <- glue("SELECT username_hash, password_hash FROM mtg_users WHERE username = ?")
@@ -64,6 +59,7 @@ login <- function(username, password,DB_username,DB_password,DB_dsn){
   }
   
   return(TRUE)
+
 }
 
 empty_fields <- function(username, password) {
@@ -76,6 +72,8 @@ empty_fields <- function(username, password) {
   return(TRUE)
 }
 
+
+
 server <- function(input, output, session) {
   
   observeEvent(input$createAccount, {
@@ -83,7 +81,7 @@ server <- function(input, output, session) {
     password <- input$passInput
     
     if (empty_fields(username,password)) {
-      account_creation(username,password,DB_username,DB_password,DB_dsn)    
+      account_creation(username,password)    
       
       # Clears the text inputs after successful login
       updateTextInput(session, "usernameInput", value = "")
@@ -98,10 +96,10 @@ server <- function(input, output, session) {
     password <- input$passInput
     
     if (empty_fields(username,password)) {
-      login_successful <- login(username,password,DB_username,DB_password,DB_dsn)
+      login_successful <- login(username,password)
       if (login_successful){
         shinyalert("Success", "Login successful!", type = "success")
-        runjs('$("#login_screen").hide(); $("#main_page").show();')
+        
       }
     }
   })
