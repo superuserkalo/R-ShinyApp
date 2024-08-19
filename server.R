@@ -1,5 +1,4 @@
 library(shiny)
-library(shinyjs)
 library(RSQLite)
 library(DBI)
 library(dplyr)
@@ -83,6 +82,13 @@ empty_fields <- function(username, password) {
 
 server <- function(input, output, session) {
   
+  logged_in <- reactiveVal(FALSE)
+  
+  output$is_logged_in <- reactive({
+    logged_in()
+  })
+  outputOptions(output, "is_logged_in", suspendWhenHidden = FALSE)
+  
   observeEvent(input$createAccount, {
     username <- input$usernameInput
     password <- input$passInput
@@ -106,7 +112,7 @@ server <- function(input, output, session) {
       login_successful <- login(username,password)
       if (login_successful){
         shinyalert("Success", "Login successful!", type = "success")
-        runjs('$("#login_screen").hide(); $("#main_page").show();')
+        logged_in(TRUE)
       }
     }
   })
