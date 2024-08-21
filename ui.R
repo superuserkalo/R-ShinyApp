@@ -1,5 +1,6 @@
 library(shiny)
 library(bslib)
+library(DT)
 
 # Define custom theme
 custom_theme <- bs_theme(
@@ -38,23 +39,31 @@ ui <- fluidPage(
       )
   ),
   
-  conditionalPanel(
+  conditionalPanel (
     condition = "output.is_logged_in",
-    fluidRow(
-      column(
-        width = 12,
-        offset = 2,
-
-        card(
-          style = "display: flex; flex-direction: column; justify-content: center; align-items: center; align: center; width: 60%;",
-          h3("Welcome to the main page!"),
-          p("This is the content displayed after a successful login."),
-          actionButton("logout", label = "Logout")
+    navbarPage(
+      title = "RTR",
+      id = "navbar",
+      
+      tabPanel("Home",
+        sidebarLayout(
+          sidebarPanel(
+            h4("Sidebar"),
+            p("This is the sidebar content."),
+          ),
+        
+          mainPanel(
+            DTOutput("media_list")  # Output for media list
           )
         )
-      )
-    ),
-  
+      ),
+        
+      tabPanel("Edit entry",
+          h3("This is Page 2")
+    )
+  )
+),
+
   # Loads custom theme
   theme = custom_theme
 )

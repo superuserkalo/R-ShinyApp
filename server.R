@@ -7,6 +7,7 @@ library(sodium)
 library(glue)
 library(shinyalert)
 library(reticulate)
+library(DT)
 
 source("utils.R")
 
@@ -80,6 +81,21 @@ empty_fields <- function(username, password) {
   return(TRUE)
 }
 
+fetch_media_list <- function(){
+  conn <- oracledb$connect(user = DB_username, password = DB_password, dsn = DB_dsn)
+  cursor <- conn$cursor()
+  
+  cursor$execute("SELECT * FROM MTG.MTG_MEDIA_LIST_TEST")  # Adjust query as per your table structure
+  df_ml <- cursor$fetchall()
+  cursor$close()
+  conn$close()
+  
+  # Convert to data frame
+  ml_df <- as.data.frame(df_ml)
+  
+  return(ml_df)
+}
+
 server <- function(input, output, session) {
   
   logged_in <- reactiveVal(FALSE)
@@ -114,6 +130,12 @@ server <- function(input, output, session) {
         shinyalert("Success", "Login successful!", type = "success")
         logged_in(TRUE)
       }
+      
+    }
+  })
+  output$media_list <- renderDT({
+    if (logged_in()) {
+      fetch_media_list()  # Fetch and render the media list as a data frame
     }
   })
 }
