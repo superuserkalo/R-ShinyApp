@@ -4,10 +4,10 @@ library(DT)
 
 # Define custom theme
 custom_theme <- bs_theme(
-  bg = "#272938",
-  fg = "#9DAAB6",
+  bg = "#f8f9fa",
+  fg = "#343a40",
   primary = "#007bff",
-  secondary = "#9DAAB6",
+  secondary = "#343a40",
   success = "#28a745",
   danger = "#dc3545",
   info = "#17a2b8",
@@ -48,8 +48,15 @@ ui <- fluidPage(
       tabPanel("Home",
         sidebarLayout(
           sidebarPanel(
-            h4("Sidebar"),
-            p("This is the sidebar content."),
+            h4("Filter"),
+            selectInput("category", "Category", choices = NULL),
+            selectInput("subcategory", "Subcategory", choices = NULL),
+            actionButton("filterButton", "Filter"),
+            conditionalPanel(
+              condition = "output.showClearFilters",
+              actionButton("clearFilters", "Clear Filters")
+            ),
+            width = 3
           ),
         
           mainPanel(
