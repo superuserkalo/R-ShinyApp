@@ -126,6 +126,12 @@ server <- function(input, output, session) {
   })
   outputOptions(output, "showClearFilters", suspendWhenHidden = FALSE)
   
+  output$hasSubcategories <- reactive({
+    has_subcategories()
+  })
+  outputOptions(output, "hasSubcategories", suspendWhenHidden = FALSE)
+  
+  
   observeEvent(input$createAccount, {
     username <- input$usernameInput
     password <- input$passInput

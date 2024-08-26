@@ -50,7 +50,10 @@ ui <- fluidPage(
           sidebarPanel(
             h4("Filter"),
             selectInput("category", "Category", choices = NULL),
-            selectInput("subcategory", "Subcategory", choices = NULL),
+            conditionalPanel(
+              condition = "output.hasSubcategories",
+              selectInput("subcategory", "Subcategory", choices = NULL),
+            ),
             actionButton("filterButton", "Filter"),
             conditionalPanel(
               condition = "output.showClearFilters",
