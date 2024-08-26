@@ -172,8 +172,9 @@ server <- function(input, output, session) {
     
     media_list_val <- media_list()
     subcategories <- unique(media_list_val$SUBCATEGORY[media_list_val$CATEGORY == input$category])
+    subcategories <- subcategories[!is.na(subcategories)]  # Filter out NA values
     has_subcategories(length(subcategories) > 0)
-    updateSelectInput(session, "subcategory", choices = c("",subcategories))
+    updateSelectInput(session, "subcategory", choices = c("", subcategories))
   })
   
   observeEvent(input$filterButton, {
