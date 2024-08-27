@@ -82,6 +82,29 @@ empty_fields <- function(username, password) {
   return(TRUE)
 }
 
+empty_fields_add <- function(category, subcategory, media_name, company_name, hide_media_name, has_subcategories) {
+  
+  # Check if both media name and company name are empty
+  if (!hide_media_name && (is.null(media_name) || media_name == "") && (is.null(company_name) || company_name == "")) {
+    shinyalert("Error", "Media Name and Company Name cannot both be empty", type = "error")
+    return(FALSE)
+  }
+  
+  # Check if media name is empty (if not hidden)
+  if (!hide_media_name && (is.null(media_name) || media_name == "")) {
+    shinyalert("Error", "Media Name must be filled out", type = "error")
+    return(FALSE)
+  }
+  
+  # Check if company name is empty
+  if (is.null(company_name) || company_name == "") {
+    shinyalert("Error", "Company Name must be filled out", type = "error")
+    return(FALSE)
+  }
+  
+  return(TRUE)
+}
+
 fetch_media_list <- function() {
   tryCatch({
     conn <- oracledb$connect(user = DB_username, password = DB_password, dsn = DB_dsn)
@@ -108,31 +131,34 @@ fetch_media_list <- function() {
   })
 }
 
-add_entry <- function(category, subcategory, media_name, company_name) {
+add_entry <- function(category, subcategory, media_name, company_name, has_addsubcategories, hide_media_name) {
   conn <- oracledb$connect(user = DB_username, password = DB_password, dsn = DB_dsn)
   cursor <- conn$cursor()
   
-  # Fetch the highest REC_ID
-  cursor$execute("SELECT MAX(REC_ID) FROM MTG.MTG_MEDIA_LIST_TEST")
-  result <- cursor$fetchone()
-  highest_rec_id <- result[[1]]
-  
-  # Generate the next REC_ID
-  if (is.null(highest_rec_id)) {
-    highest_rec_id <- 0
-  }
-  new_rec_id <- highest_rec_id + 1
-  
+  # Check if the entry already exists within the same category
   cursor$execute(
-    "INSERT INTO MTG.MTG_MEDIA_LIST_TEST (REC_ID, CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME) VALUES (:rec_id, :category, :subcategory, :media_name, :company_name)",
-    dict(rec_id = new_rec_id, category = category, subcategory = subcategory, media_name = media_name, company_name = company_name)
+    "SELECT COUNT(*) FROM MTG.MTG_MEDIA_LIST_TEST WHERE CATEGORY = :1 AND MEDIA_NAME = :2 AND COMPANY_NAME = :3",
+    list(category, media_name, company_name)
   )
+  result <- cursor$fetchone()
   
-  conn$commit()
+  if (result[[1]] > 0) {
+    shinyalert("Error", "Duplicate entry detected within the same category!", type = "error")
+  } else {
+   
+    cursor$execute(
+      "INSERT INTO MTG.MTG_MEDIA_LIST_TEST (CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME) VALUES (:rec_id, :category, :subcategory, :media_name, :company_name)",
+      dict(category = category, subcategory = subcategory, media_name = media_name, company_name = company_name)
+    )
+    
+    conn$commit()
+    shinyalert("Success", "Entry added successfully!", type = "success")
+  }
+  
   cursor$close()
   conn$close()
-  
-} 
+}
+
 
 server <- function(input, output, session) {
   
@@ -143,6 +169,8 @@ server <- function(input, output, session) {
   has_subcategories <- reactiveVal(FALSE)
   addbutton_pressed <- reactiveVal(FALSE)
   has_addsubcategories <- reactiveVal(FALSE)
+  adding_entry <- reactiveVal(FALSE)
+  hide_media_name <- reactiveVal(FALSE)
   
   output$is_logged_in <- reactive({
     logged_in()
@@ -168,6 +196,16 @@ server <- function(input, output, session) {
     has_addsubcategories()
   })
   outputOptions(output, "hasAddSubcategories", suspendWhenHidden = FALSE)
+  
+  output$addingEntry <- reactive({
+    adding_entry()
+  })
+  outputOptions(output, "addingEntry", suspendWhenHidden = FALSE)
+  
+  output$hideMediaName <- reactive({
+    hide_media_name()
+  })
+  outputOptions(output, "hideMediaName", suspendWhenHidden = FALSE)
   
   observeEvent(input$createAccount, {
     username <- input$usernameInput
@@ -210,7 +248,12 @@ server <- function(input, output, session) {
     subcategories <- unique(media_list_val$SUBCATEGORY[media_list_val$CATEGORY == input$category])
     subcategories <- subcategories[!is.na(subcategories)]  # Filter out NA values
     has_subcategories(length(subcategories) > 0)
-    updateSelectInput(session, "subcategory", choices = c("", subcategories))
+    
+    if (length(subcategories) > 0) {
+      updateSelectInput(session, "subcategory", choices = subcategories, selected = subcategories[1])
+    } else {
+      updateSelectInput(session, "subcategory", choices = NULL)
+    }
   })
   
   observeEvent(input$filterButton, {
@@ -259,33 +302,44 @@ server <- function(input, output, session) {
     subcategories <- unique(media_list_val$SUBCATEGORY[media_list_val$CATEGORY == input$addCategory])
     subcategories <- subcategories[!is.na(subcategories)]  # Filter out NA values
     has_addsubcategories(length(subcategories) > 0)
-    updateSelectInput(session, "addSubcategory", choices = c("", subcategories))
+    
+    if (length(subcategories) > 0) {
+      updateSelectInput(session, "addSubcategory", choices = subcategories, selected = subcategories[1])
+    } else {
+      updateSelectInput(session, "addSubcategory", choices = NULL)
+    }
+    
+    hide_media_name(input$addCategory %in% c("OOH", "P4"))
   })
   
   observeEvent(input$cancelAddButton, {
     
-    updateSelectInput(session, "addCategory", selected = "")
-    updateSelectInput(session, "addSubcategory", selected = "")
     updateTextInput(session, "saddMediaName", value = "")
     updateTextInput(session, "addCompanyName", value = "")
+    adding_entry(FALSE)
     addbutton_pressed(FALSE)
   })
   
   observeEvent(input$addEntryButton, {
+    adding_entry(TRUE)
+    
     CATEGORY <- input$addCategory
     SUBCATEGORY <- input$addSubcategory
     MEDIA_NAME <- input$addMediaName
     COMPANY_NAME <- input$addCompanyName
     
-    updateSelectInput(session, "addCategory", selected = "")
-    updateSelectInput(session, "addSubcategory", selected = "")
+    if (!empty_fields_add(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, hide_media_name(), has_addsubcategories())) {
+      adding_entry(FALSE)
+      return()
+    }
+
+    add_entry(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME)
+    media_list(fetch_media_list())
+    
     updateTextInput(session, "addMediaName", value = "")
     updateTextInput(session, "addCompanyName", value = "")
+    
     addbutton_pressed(FALSE)
-    
-    add_entry(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME)
-    
-    media_list(fetch_media_list())
   })
 }
 

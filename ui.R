@@ -67,11 +67,12 @@ ui <- fluidPage(
                      card(
                        h4("Management"),
                        conditionalPanel(
-                         condition = "!output.addButtonPressed",
+                         condition = "!output.addButtonPressed || !output.editButtonPressed || !output.deleteButtonPressed",
                          actionButton("addButton", "Add"),
                          actionButton("editButton", "Edit"),
                          actionButton("deleteButton", "Delete")
                        ),
+                       
                        conditionalPanel(
                          condition = "output.addButtonPressed",
                          selectInput("addCategory", "Category", choices = NULL),
@@ -79,11 +80,29 @@ ui <- fluidPage(
                            condition = "output.hasAddSubcategories",
                            selectInput("addSubcategory", "Subcategory", choices = NULL)
                          ),
-                         textInput("addMediaName", "Media Name", value = ""),
+                         conditionalPanel(
+                           condition = "!output.hideMediaName",
+                           textInput("addMediaName", "Media Name", value = "")
+                         ),
                          textInput("addCompanyName", "Company Name", value = ""),
-                         actionButton("addEntryButton", "Add Entry"),
+                         conditionalPanel(
+                           condition = "!output.addingEntry",
+                           actionButton("addEntryButton", "Add Entry")
+                         ),
+                         conditionalPanel(
+                           condition = "output.addingEntry",
+                           p("Adding entry...")
+                         ),
                          actionButton("cancelAddButton", "Cancel")
-                       )
+                       ),
+                       
+                       conditionalPanel(
+                         condition = "output.editButtonPressed"
+                       ),
+                       
+                       conditionalPanel(
+                         condition = "output.deleteButtonPressed"
+                       ),
                      )
                    ),
                    width = 3
