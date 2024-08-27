@@ -159,6 +159,18 @@ add_entry <- function(category, subcategory, media_name, company_name, has_addsu
   conn$close()
 }
 
+delete_entries <- function(selected_ids) {
+  conn <- oracledb$connect(user = DB_username, password = DB_password, dsn = DB_dsn)
+  cursor <- conn$cursor()
+  
+  for (rec_id in selected_ids) {
+    cursor$execute("DELETE FROM MTG.MTG_MEDIA_LIST_TEST WHERE REC_ID = :rec_id", dict(rec_id = rec_id))
+  }
+  
+  conn$commit()
+  cursor$close()
+  conn$close()
+}
 
 server <- function(input, output, session) {
   
@@ -235,12 +247,12 @@ server <- function(input, output, session) {
         updateSelectInput(session, "category", choices = categories)
 
         output$media_list <- renderDT({
-          datatable(media_list())
+          datatable(media_list(), selection = list(mode = 'multiple', target = 'row'))
         })
       }
       
     }
-  })
+})
   
   observeEvent(input$category, {
     
@@ -341,6 +353,39 @@ server <- function(input, output, session) {
     
     addbutton_pressed(FALSE)
   })
+  
+  observeEvent(input$deleteButton, {
+    selected_rows <- input$media_list_rows_selected
+    
+    if (length(selected_rows) == 0) {
+      shinyalert("No selection", "Please select one or more rows to delete.", type = "warning")
+    } else {
+      # Get the selected REC_IDs
+      selected_ids <- media_list()[selected_rows, "REC_ID"]
+      
+      shinyalert(
+        title = "Are you sure?",
+        text = "Do you really want to delete the selected entries?",
+        type = "warning",
+        showCancelButton = TRUE,
+        confirmButtonText = "Yes",
+        cancelButtonText = "No",
+        callbackR = function(confirm) {
+          if (confirm) {
+            delete_entries(selected_ids)
+            shinyalert("Deleted", "The selected entries have been deleted.", type = "success")
+            
+            # Refresh the media list after deletion
+            media_list(fetch_media_list())
+            output$media_list <- renderDT({
+              datatable(media_list(), selection = "multiple")
+            })
+          }
+        }
+      )
+    }
+  })
+  
 }
 
 
