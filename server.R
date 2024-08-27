@@ -108,6 +108,32 @@ fetch_media_list <- function() {
   })
 }
 
+add_entry <- function(category, subcategory, media_name, company_name) {
+  conn <- oracledb$connect(user = DB_username, password = DB_password, dsn = DB_dsn)
+  cursor <- conn$cursor()
+  
+  # Fetch the highest REC_ID
+  cursor$execute("SELECT MAX(REC_ID) FROM MTG.MTG_MEDIA_LIST_TEST")
+  result <- cursor$fetchone()
+  highest_rec_id <- result[[1]]
+  
+  # Generate the next REC_ID
+  if (is.null(highest_rec_id)) {
+    highest_rec_id <- 0
+  }
+  new_rec_id <- highest_rec_id + 1
+  
+  cursor$execute(
+    "INSERT INTO MTG.MTG_MEDIA_LIST_TEST (REC_ID, CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME) VALUES (:rec_id, :category, :subcategory, :media_name, :company_name)",
+    dict(rec_id = new_rec_id, category = category, subcategory = subcategory, media_name = media_name, company_name = company_name)
+  )
+  
+  conn$commit()
+  cursor$close()
+  conn$close()
+  
+} 
+
 server <- function(input, output, session) {
   
   logged_in <- reactiveVal(FALSE)
@@ -115,6 +141,8 @@ server <- function(input, output, session) {
   filtered_medialist <- reactiveVal(NULL)
   media_list <- reactiveVal(NULL)
   has_subcategories <- reactiveVal(FALSE)
+  addbutton_pressed <- reactiveVal(FALSE)
+  has_addsubcategories <- reactiveVal(FALSE)
   
   output$is_logged_in <- reactive({
     logged_in()
@@ -131,6 +159,15 @@ server <- function(input, output, session) {
   })
   outputOptions(output, "hasSubcategories", suspendWhenHidden = FALSE)
   
+  output$addButtonPressed <- reactive({
+    addbutton_pressed()
+  })
+  outputOptions(output, "addButtonPressed", suspendWhenHidden = FALSE)
+  
+  output$hasAddSubcategories <- reactive({
+    has_addsubcategories()
+  })
+  outputOptions(output, "hasAddSubcategories", suspendWhenHidden = FALSE)
   
   observeEvent(input$createAccount, {
     username <- input$usernameInput
@@ -142,8 +179,7 @@ server <- function(input, output, session) {
       updateTextInput(session, "usernameInput", value = "")
       updateTextInput(session, "passInput", value = "")
     }  
-    
-    
+
   })
   
   observeEvent(input$loginAccount, {
@@ -211,7 +247,46 @@ server <- function(input, output, session) {
       datatable(media_list())
     })
   })
+  observeEvent(input$addButton, {
+    addbutton_pressed(TRUE)
+    
+    categories <- unique(media_list()$CATEGORY)
+    updateSelectInput(session, "addCategory", choices = categories)
+  })
   
+  observeEvent(input$addCategory, {
+    media_list_val <- media_list()
+    subcategories <- unique(media_list_val$SUBCATEGORY[media_list_val$CATEGORY == input$addCategory])
+    subcategories <- subcategories[!is.na(subcategories)]  # Filter out NA values
+    has_addsubcategories(length(subcategories) > 0)
+    updateSelectInput(session, "addSubcategory", choices = c("", subcategories))
+  })
+  
+  observeEvent(input$cancelAddButton, {
+    
+    updateSelectInput(session, "addCategory", selected = "")
+    updateSelectInput(session, "addSubcategory", selected = "")
+    updateTextInput(session, "saddMediaName", value = "")
+    updateTextInput(session, "addCompanyName", value = "")
+    addbutton_pressed(FALSE)
+  })
+  
+  observeEvent(input$addEntryButton, {
+    CATEGORY <- input$addCategory
+    SUBCATEGORY <- input$addSubcategory
+    MEDIA_NAME <- input$addMediaName
+    COMPANY_NAME <- input$addCompanyName
+    
+    updateSelectInput(session, "addCategory", selected = "")
+    updateSelectInput(session, "addSubcategory", selected = "")
+    updateTextInput(session, "addMediaName", value = "")
+    updateTextInput(session, "addCompanyName", value = "")
+    addbutton_pressed(FALSE)
+    
+    add_entry(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME)
+    
+    media_list(fetch_media_list())
+  })
 }
 
 
