@@ -131,29 +131,81 @@ fetch_media_list <- function() {
   })
 }
 
-add_entry <- function(category, subcategory, media_name, company_name, has_addsubcategories, hide_media_name) {
+duplicate_filter <- function(category, subcategory, media_name, company_name, has_addsubcategories, hide_media_name) {
   conn <- oracledb$connect(user = DB_username, password = DB_password, dsn = DB_dsn)
   cursor <- conn$cursor()
   
-  # Check if the entry already exists within the same category
-  cursor$execute(
-    "SELECT COUNT(*) FROM MTG.MTG_MEDIA_LIST_TEST WHERE CATEGORY = :1 AND MEDIA_NAME = :2 AND COMPANY_NAME = :3",
-    list(category, media_name, company_name)
-  )
+  # Define the base query for duplicate check
+  base_query <- "SELECT COUNT(*) FROM MTG.MTG_MEDIA_LIST_TEST WHERE CATEGORY = :1"
+  params <- list(category)
+  
+  # Add conditions based on the category requirements
+  if (has_addsubcategories && !hide_media_name) {
+    base_query <- paste0(base_query, " AND SUBCATEGORY = :2 AND MEDIA_NAME = :3 AND COMPANY_NAME = :4")
+    params <- list(category, subcategory, media_name, company_name)
+  } else if (!has_addsubcategories && !hide_media_name) {
+    base_query <- paste0(base_query, " AND MEDIA_NAME = :2 AND COMPANY_NAME = :3")
+    params <- list(category, media_name, company_name)
+  } else if (has_addsubcategories && hide_media_name) {
+    base_query <- paste0(base_query, " AND SUBCATEGORY = :2 AND COMPANY_NAME = :3")
+    params <- list(category, subcategory, company_name)
+  } else if (!has_addsubcategories && hide_media_name) {
+    base_query <- paste0(base_query, " AND COMPANY_NAME = :2")
+    params <- list(category, company_name)
+  }
+  
+  # Execute the duplicate check query
+  cursor$execute(base_query, params)
   result <- cursor$fetchone()
   
   if (result[[1]] > 0) {
-    shinyalert("Error", "Duplicate entry detected within the same category!", type = "error")
+    shinyalert("Error", "Duplicate entry detected", type = "error")
+    return(FALSE)
   } else {
-   
-    cursor$execute(
-      "INSERT INTO MTG.MTG_MEDIA_LIST_TEST (CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME) VALUES (:rec_id, :category, :subcategory, :media_name, :company_name)",
-      dict(category = category, subcategory = subcategory, media_name = media_name, company_name = company_name)
-    )
-    
-    conn$commit()
-    shinyalert("Success", "Entry added successfully!", type = "success")
+    return(TRUE)
   }
+
+  cursor$close()
+  conn$close()
+}
+
+add_entry <- function(category, subcategory, media_name, company_name, has_addsubcategories, hide_media_name) {
+  conn <- oracledb$connect(user = DB_username, password = DB_password, dsn = DB_dsn)
+  cursor <- conn$cursor()
+   
+  # Define the base query for insertion
+  base_insert_query <- "INSERT INTO MTG.MTG_MEDIA_LIST_TEST (CATEGORY"
+  insert_params <- dict(category = category)
+    
+  # Add fields based on the category requirements
+  if (has_addsubcategories) {
+    base_insert_query <- paste0(base_insert_query, ", SUBCATEGORY")
+    insert_params$subcategory <- subcategory
+  }
+    
+  if (!hide_media_name) {
+    base_insert_query <- paste0(base_insert_query, ", MEDIA_NAME")
+    insert_params$media_name <- media_name
+  }
+    
+  base_insert_query <- paste0(base_insert_query, ", COMPANY_NAME) VALUES (:category")
+  insert_params$company_name <- company_name
+    
+  if (has_addsubcategories) {
+    base_insert_query <- paste0(base_insert_query, ", :subcategory")
+  }
+    
+  if (!hide_media_name) {
+    base_insert_query <- paste0(base_insert_query, ", :media_name")
+  }
+    
+  base_insert_query <- paste0(base_insert_query, ", :company_name)")
+    
+  # Execute the insertion query
+  cursor$execute(base_insert_query, insert_params)
+    
+  conn$commit()
+  shinyalert("Success", "Entry added successfully!", type = "success")
   
   cursor$close()
   conn$close()
@@ -163,16 +215,43 @@ delete_entries <- function(selected_ids) {
   conn <- oracledb$connect(user = DB_username, password = DB_password, dsn = DB_dsn)
   cursor <- conn$cursor()
   
-  for (rec_id in selected_ids) {
-    cursor$execute("DELETE FROM MTG.MTG_MEDIA_LIST_TEST WHERE REC_ID = :rec_id", dict(rec_id = rec_id))
-  }
-  
-  conn$commit()
-  cursor$close()
-  conn$close()
+  tryCatch({
+    for (rec_id in selected_ids) {
+      cursor$execute("DELETE FROM MTG.MTG_MEDIA_LIST_TEST WHERE REC_ID = :rec_id", dict(rec_id = rec_id))
+    }
+    
+    conn$commit()
+    shinyalert("Deleted", "The selected entries have been deleted.", type = "success")
+  }, error = function(e) {
+    conn$rollback()
+    shinyalert("Error", paste("Deletion failed:", e$message), type = "error")
+  }, finally = {
+    cursor$close()
+    conn$close()
+  })
 }
 
-server <- function(input, output, session) {
+save_edit <- function(rec_id, new_media_name, new_company_name) {
+  conn <- oracledb$connect(user = DB_username, password = DB_password, dsn = DB_dsn)
+  cursor <- conn$cursor()
+  
+  tryCatch({
+    cursor$execute(
+      "UPDATE MTG.MTG_MEDIA_LIST_TEST SET MEDIA_NAME = :1, COMPANY_NAME = :2 WHERE REC_ID = :3",
+      list(new_media_name, new_company_name, rec_id)
+    )
+    conn$commit()
+    shinyalert("Success", "Entry updated successfully!", type = "success")
+  }, error = function(e) {
+    conn$rollback()
+    shinyalert("Error", paste("Update failed:", e$message), type = "error")
+  }, finally = {
+    cursor$close()
+    conn$close()
+  })
+}
+
+server <- function(input, output, session) { 
   
   logged_in <- reactiveVal(FALSE)
   show_clear_filters <- reactiveVal(FALSE)
@@ -183,6 +262,8 @@ server <- function(input, output, session) {
   has_addsubcategories <- reactiveVal(FALSE)
   adding_entry <- reactiveVal(FALSE)
   hide_media_name <- reactiveVal(FALSE)
+  editing_entry <- reactiveVal(FALSE)
+  selected_row <- reactiveVal(NULL)
   
   output$is_logged_in <- reactive({
     logged_in()
@@ -218,6 +299,11 @@ server <- function(input, output, session) {
     hide_media_name()
   })
   outputOptions(output, "hideMediaName", suspendWhenHidden = FALSE)
+  
+  output$editingEntry <- reactive({
+    editing_entry()
+  })
+  outputOptions(output, "editingEntry", suspendWhenHidden = FALSE)
   
   observeEvent(input$createAccount, {
     username <- input$usernameInput
@@ -332,27 +418,37 @@ server <- function(input, output, session) {
     addbutton_pressed(FALSE)
   })
   
-  observeEvent(input$addEntryButton, {
-    adding_entry(TRUE)
-    
-    CATEGORY <- input$addCategory
-    SUBCATEGORY <- input$addSubcategory
-    MEDIA_NAME <- input$addMediaName
-    COMPANY_NAME <- input$addCompanyName
-    
-    if (!empty_fields_add(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, hide_media_name(), has_addsubcategories())) {
-      adding_entry(FALSE)
-      return()
-    }
-
-    add_entry(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME)
+observeEvent(input$addEntryButton, {
+  adding_entry(TRUE)
+  
+  CATEGORY <- input$addCategory
+  SUBCATEGORY <- input$addSubcategory
+  MEDIA_NAME <- input$addMediaName
+  COMPANY_NAME <- input$addCompanyName
+  
+  if (!empty_fields_add(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, hide_media_name(), has_addsubcategories())) {
+    adding_entry(FALSE)
+    return()
+  }
+  
+  if (duplicate_filter(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, has_addsubcategories(), hide_media_name())) {
+    add_entry(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, has_addsubcategories(), hide_media_name())
     media_list(fetch_media_list())
-    
+    updateSelectInput(session, "addCategory", selected = "")
+    updateSelectInput(session, "addSubcategory", selected = NULL)
     updateTextInput(session, "addMediaName", value = "")
     updateTextInput(session, "addCompanyName", value = "")
-    
+    adding_entry(FALSE)
     addbutton_pressed(FALSE)
-  })
+  } else {
+    updateSelectInput(session, "addCategory", selected = "")
+    updateSelectInput(session, "addSubcategory", selected = NULL)
+    updateTextInput(session, "addMediaName", value = "")
+    updateTextInput(session, "addCompanyName", value = "")
+    adding_entry(FALSE)
+    addbutton_pressed(FALSE)
+  }
+})
   
   observeEvent(input$deleteButton, {
     selected_rows <- input$media_list_rows_selected
@@ -360,8 +456,12 @@ server <- function(input, output, session) {
     if (length(selected_rows) == 0) {
       shinyalert("No selection", "Please select one or more rows to delete.", type = "warning")
     } else {
-      # Get the selected REC_IDs
-      selected_ids <- media_list()[selected_rows, "REC_ID"]
+      # Determine whether to use the filtered or unfiltered list
+      if (!is.null(filtered_medialist()) && nrow(filtered_medialist()) > 0) {
+        selected_ids <- filtered_medialist()[selected_rows, "REC_ID"]
+      } else {
+        selected_ids <- media_list()[selected_rows, "REC_ID"]
+      }
       
       shinyalert(
         title = "Are you sure?",
@@ -373,20 +473,82 @@ server <- function(input, output, session) {
         callbackR = function(confirm) {
           if (confirm) {
             delete_entries(selected_ids)
-            shinyalert("Deleted", "The selected entries have been deleted.", type = "success")
             
             # Refresh the media list after deletion
             media_list(fetch_media_list())
+            filtered_medialist(NULL)  # Clear the filtered list
             output$media_list <- renderDT({
               datatable(media_list(), selection = "multiple")
             })
+          } else {
+            shinyalert("Error", "Deletion failed!", type = "error")
           }
         }
       )
     }
   })
+
+observeEvent(input$editButton, {
+  selected_rows <- input$media_list_rows_selected
   
+  if (length(selected_rows) == 0) {
+    shinyalert("No selection", "Please select one row to edit.", type = "warning")
+  } else if (length(selected_rows) > 1) {
+    shinyalert("Multiple selection", "Please select only one row to edit.", type = "warning")
+  } else {
+    selected_row(selected_rows)
+    editing_entry(TRUE)
+    
+    # Determine whether to use the filtered or unfiltered list
+    if (!is.null(filtered_medialist()) && nrow(filtered_medialist()) > 0) {
+      row_data <- filtered_medialist()[selected_rows, ]
+    } else {
+      row_data <- media_list()[selected_rows, ]
+    }
+    
+    showModal(modalDialog(
+      title = "Edit Entry",
+      textInput("editMediaName", "Media Name", value = row_data$MEDIA_NAME),
+      textInput("editCompanyName", "Company Name", value = row_data$COMPANY_NAME),
+      footer = tagList(
+        actionButton("saveEditButton", "Save"),
+        actionButton("cancelEditButton", "Cancel")
+      )
+    ))
+  }
+})
+
+  observeEvent(input$saveEditButton, {
+    removeModal()
+  
+    rec_id <- media_list()[selected_row(), "REC_ID"]
+    new_media_name <- input$editMediaName
+    new_company_name <- input$editCompanyName
+  
+    shinyalert(
+      title = "Confirm",
+      text = "Are you sure you want to save the changes?",
+      type = "warning",
+      showCancelButton = TRUE,
+      confirmButtonText = "Yes",
+      cancelButtonText = "No",
+      callbackR = function(confirm) {
+        if (confirm) {
+          save_edit(rec_id, new_media_name, new_company_name)
+          media_list(fetch_media_list())
+          filtered_medialist(NULL)  # Clear the filtered list
+          output$media_list <- renderDT({
+            datatable(media_list(), selection = "multiple")
+          })
+        }
+      }
+    )
+  })
+  
+  observeEvent(input$cancelEditButton, {
+    removeModal()
+    selected_row(NULL)
+    editing_entry(FALSE)
+  })
 }
-
-
 

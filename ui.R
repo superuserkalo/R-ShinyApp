@@ -67,7 +67,7 @@ ui <- fluidPage(
                      card(
                        h4("Management"),
                        conditionalPanel(
-                         condition = "!output.addButtonPressed || !output.editButtonPressed || !output.deleteButtonPressed",
+                         condition = "!output.addButtonPressed",
                          actionButton("addButton", "Add"),
                          actionButton("editButton", "Edit"),
                          actionButton("deleteButton", "Delete")
@@ -97,11 +97,7 @@ ui <- fluidPage(
                        ),
                        
                        conditionalPanel(
-                         condition = "output.editButtonPressed"
-                       ),
-                       
-                       conditionalPanel(
-                         condition = "output.deleteButtonPressed"
+                         condition = "output.editingEntry"
                        ),
                      )
                    ),
