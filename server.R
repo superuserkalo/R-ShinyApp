@@ -265,6 +265,11 @@ server <- function(input, output, session) {
   editing_entry <- reactiveVal(FALSE)
   selected_row <- reactiveVal(NULL)
   
+  output$rowsSelected <- reactive({
+    length(input$media_list_rows_selected) > 0
+  })
+  outputOptions(output, "rowsSelected", suspendWhenHidden = FALSE)
+  
   output$is_logged_in <- reactive({
     logged_in()
   })
@@ -388,67 +393,82 @@ server <- function(input, output, session) {
       datatable(media_list())
     })
   })
+  
   observeEvent(input$addButton, {
     addbutton_pressed(TRUE)
     
     categories <- unique(media_list()$CATEGORY)
-    updateSelectInput(session, "addCategory", choices = categories)
+    updateSelectInput(session, "addCategoryModal", choices = categories)
+    
+    showModal(modalDialog(
+      title = "Add Entry",
+      selectInput("addCategoryModal", "Category", choices = unique(media_list()$CATEGORY)),
+      conditionalPanel(
+        condition = "output.hasAddSubcategories",
+        selectInput("addSubcategoryModal", "Subcategory", choices = NULL)
+      ),
+      conditionalPanel(
+        condition = "!output.hideMediaName",
+        textInput("addMediaNameModal", "Media Name", value = "")
+      ),
+      textInput("addCompanyNameModal", "Company Name", value = ""),
+      footer = tagList(
+        actionButton("saveAddButton", "Save"),
+        actionButton("cancelAddButtonModal", "Cancel")
+      )
+    ))
   })
   
-  observeEvent(input$addCategory, {
+  observeEvent(input$addCategoryModal, {
     media_list_val <- media_list()
-    subcategories <- unique(media_list_val$SUBCATEGORY[media_list_val$CATEGORY == input$addCategory])
+    subcategories <- unique(media_list_val$SUBCATEGORY[media_list_val$CATEGORY == input$addCategoryModal])
     subcategories <- subcategories[!is.na(subcategories)]  # Filter out NA values
     has_addsubcategories(length(subcategories) > 0)
     
     if (length(subcategories) > 0) {
-      updateSelectInput(session, "addSubcategory", choices = subcategories, selected = subcategories[1])
+      updateSelectInput(session, "addSubcategoryModal", choices = subcategories, selected = subcategories[1])
     } else {
-      updateSelectInput(session, "addSubcategory", choices = NULL)
+      updateSelectInput(session, "addSubcategoryModal", choices = NULL)
     }
     
-    hide_media_name(input$addCategory %in% c("OOH", "P4"))
+    hide_media_name(input$addCategoryModal %in% c("OOH", "P4"))
   })
   
-  observeEvent(input$cancelAddButton, {
+  observeEvent(input$cancelAddButtonModal, {
+    removeModal()
+    updateTextInput(session, "addMediaName", value = "")
+    updateTextInput(session, "addCompanyName", value = "")
+    adding_entry(FALSE)
+    addbutton_pressed(FALSE)
+  })
+  
+  observeEvent(input$saveAddButton, {
+    removeModal()
     
-    updateTextInput(session, "saddMediaName", value = "")
-    updateTextInput(session, "addCompanyName", value = "")
-    adding_entry(FALSE)
-    addbutton_pressed(FALSE)
+    CATEGORY <- input$addCategoryModal
+    SUBCATEGORY <- input$addSubcategoryModal
+    MEDIA_NAME <- input$addMediaNameModal
+    COMPANY_NAME <- input$addCompanyNameModal
+    
+    if (!empty_fields_add(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, hide_media_name(), has_addsubcategories())) {
+      adding_entry(FALSE)
+      return()
+    }
+    
+    if (duplicate_filter(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, has_addsubcategories(), hide_media_name())) {
+      add_entry(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, has_addsubcategories(), hide_media_name())
+      media_list(fetch_media_list())
+      updateTextInput(session, "addMediaNameModal", value = "")
+      updateTextInput(session, "addCompanyNameModal", value = "")
+      adding_entry(FALSE)
+      addbutton_pressed(FALSE)
+    } else {
+      updateTextInput(session, "addMediaNameModal", value = "")
+      updateTextInput(session, "addCompanyNameModal", value = "")
+      adding_entry(FALSE)
+      addbutton_pressed(FALSE)
+    }
   })
-  
-observeEvent(input$addEntryButton, {
-  adding_entry(TRUE)
-  
-  CATEGORY <- input$addCategory
-  SUBCATEGORY <- input$addSubcategory
-  MEDIA_NAME <- input$addMediaName
-  COMPANY_NAME <- input$addCompanyName
-  
-  if (!empty_fields_add(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, hide_media_name(), has_addsubcategories())) {
-    adding_entry(FALSE)
-    return()
-  }
-  
-  if (duplicate_filter(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, has_addsubcategories(), hide_media_name())) {
-    add_entry(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, has_addsubcategories(), hide_media_name())
-    media_list(fetch_media_list())
-    updateSelectInput(session, "addCategory", selected = "")
-    updateSelectInput(session, "addSubcategory", selected = NULL)
-    updateTextInput(session, "addMediaName", value = "")
-    updateTextInput(session, "addCompanyName", value = "")
-    adding_entry(FALSE)
-    addbutton_pressed(FALSE)
-  } else {
-    updateSelectInput(session, "addCategory", selected = "")
-    updateSelectInput(session, "addSubcategory", selected = NULL)
-    updateTextInput(session, "addMediaName", value = "")
-    updateTextInput(session, "addCompanyName", value = "")
-    adding_entry(FALSE)
-    addbutton_pressed(FALSE)
-  }
-})
   
   observeEvent(input$deleteButton, {
     selected_rows <- input$media_list_rows_selected
@@ -488,7 +508,7 @@ observeEvent(input$addEntryButton, {
     }
   })
 
-observeEvent(input$editButton, {
+  observeEvent(input$editButton, {
   selected_rows <- input$media_list_rows_selected
   
   if (length(selected_rows) == 0) {
@@ -537,6 +557,7 @@ observeEvent(input$editButton, {
           save_edit(rec_id, new_media_name, new_company_name)
           media_list(fetch_media_list())
           filtered_medialist(NULL)  # Clear the filtered list
+          show_clear_filters(FALSE)
           output$media_list <- renderDT({
             datatable(media_list(), selection = "multiple")
           })
@@ -549,6 +570,25 @@ observeEvent(input$editButton, {
     removeModal()
     selected_row(NULL)
     editing_entry(FALSE)
+  })
+
+  output$selectedRowsInfo <- renderText({
+    selected_rows <- input$media_list_rows_selected
+    if (length(selected_rows) > 0) {
+      selected_ids <- if (!is.null(filtered_medialist()) && nrow(filtered_medialist()) > 0) {
+        filtered_medialist()[selected_rows, "REC_ID"]
+      } else {
+        media_list()[selected_rows, "REC_ID"]
+      }
+      paste("Selected Rows:", length(selected_rows), "REC_IDs:", paste(selected_ids, collapse = ", "))
+    
+    } else {
+      ""
+    }
+  })
+
+  observeEvent(input$clearSelection, {
+    selectRows(dataTableProxy("media_list"), NULL)
   })
 }
 

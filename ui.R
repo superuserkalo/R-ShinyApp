@@ -66,39 +66,17 @@ ui <- fluidPage(
                      ),
                      card(
                        h4("Management"),
-                       conditionalPanel(
-                         condition = "!output.addButtonPressed",
-                         actionButton("addButton", "Add"),
-                         actionButton("editButton", "Edit"),
-                         actionButton("deleteButton", "Delete")
-                       ),
-                       
-                       conditionalPanel(
-                         condition = "output.addButtonPressed",
-                         selectInput("addCategory", "Category", choices = NULL),
-                         conditionalPanel(
-                           condition = "output.hasAddSubcategories",
-                           selectInput("addSubcategory", "Subcategory", choices = NULL)
-                         ),
-                         conditionalPanel(
-                           condition = "!output.hideMediaName",
-                           textInput("addMediaName", "Media Name", value = "")
-                         ),
-                         textInput("addCompanyName", "Company Name", value = ""),
-                         conditionalPanel(
-                           condition = "!output.addingEntry",
-                           actionButton("addEntryButton", "Add Entry")
-                         ),
-                         conditionalPanel(
-                           condition = "output.addingEntry",
-                           p("Adding entry...")
-                         ),
-                         actionButton("cancelAddButton", "Cancel")
-                       ),
-                       
-                       conditionalPanel(
-                         condition = "output.editingEntry"
-                       ),
+                        actionButton("addButton", "Add"),
+                        actionButton("editButton", "Edit"),
+                        actionButton("deleteButton", "Delete")
+                     ),
+                     conditionalPanel(
+                       condition = "output.rowsSelected",
+                       card(
+                        h4("Selected Rows"),
+                        textOutput("selectedRowsInfo"),
+                        actionButton("clearSelection", "Clear Selection")
+                       )
                      )
                    ),
                    width = 3
