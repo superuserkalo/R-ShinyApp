@@ -82,7 +82,7 @@ empty_fields <- function(username, password) {
   return(TRUE)
 }
 
-empty_fields_add <- function(category, subcategory, media_name, company_name, hide_media_name, has_subcategories) {
+empty_fields_add <- function(category, subcategory, media_name, company_name, hide_media_name) {
   
   # Check if both media name and company name are empty
   if (!hide_media_name && (is.null(media_name) || media_name == "") && (is.null(company_name) || company_name == "")) {
@@ -164,7 +164,7 @@ duplicate_filter <- function(category, subcategory, media_name, company_name, ha
   } else {
     return(TRUE)
   }
-
+  
   cursor$close()
   conn$close()
 }
@@ -211,13 +211,20 @@ add_entry <- function(category, subcategory, media_name, company_name, has_addsu
   conn$close()
 }
 
-delete_entries <- function(selected_ids) {
+delete_entries <- function(selected_ids, username) {
   conn <- oracledb$connect(user = DB_username, password = DB_password, dsn = DB_dsn)
   cursor <- conn$cursor()
   
   tryCatch({
     for (rec_id in selected_ids) {
-      cursor$execute("DELETE FROM MTG.MTG_MEDIA_LIST_TEST WHERE REC_ID = :rec_id", dict(rec_id = rec_id))
+      # Log the deletion
+      log_query <- "INSERT INTO MTG.MTG_MEDIA_LIST_DELETED_TEST (REC_ID, DAT_DELETED, USER_NAME) VALUES (:1, SYSDATE, :2)"
+      cursor$execute(log_query, list(rec_id, username))
+      
+      # Delete the entry
+      delete_query <- "DELETE FROM MTG.MTG_MEDIA_LIST_TEST WHERE REC_ID = :rec_id"
+      cursor$execute(delete_query, dict(rec_id = rec_id))
+      
     }
     
     conn$commit()
@@ -251,9 +258,12 @@ save_edit <- function(rec_id, new_media_name, new_company_name) {
   })
 }
 
+
+
 server <- function(input, output, session) { 
   
   logged_in <- reactiveVal(FALSE)
+  logged_in_user <- reactiveVal(NULL)
   show_clear_filters <- reactiveVal(FALSE)
   filtered_medialist <- reactiveVal(NULL)
   media_list <- reactiveVal(NULL)
@@ -327,11 +337,12 @@ server <- function(input, output, session) {
     username <- input$usernameInput
     password <- input$passInput
     
-    if (empty_fields(username,password)) {
+    if (empty_fields(username, password)) {
       login_successful <- login(username,password)
       if (login_successful){
         shinyalert("Success", "Login successful!", type = "success")
         logged_in(TRUE)
+        logged_in_user(username)
         
         media_list(fetch_media_list())
         categories <- unique(media_list()$CATEGORY)
@@ -341,7 +352,6 @@ server <- function(input, output, session) {
           datatable(media_list(), selection = list(mode = 'multiple', target = 'row'))
         })
       }
-      
     }
 })
   
@@ -443,14 +453,13 @@ server <- function(input, output, session) {
   })
   
   observeEvent(input$saveAddButton, {
-    removeModal()
-    
+
     CATEGORY <- input$addCategoryModal
     SUBCATEGORY <- input$addSubcategoryModal
     MEDIA_NAME <- input$addMediaNameModal
     COMPANY_NAME <- input$addCompanyNameModal
     
-    if (!empty_fields_add(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, hide_media_name(), has_addsubcategories())) {
+    if (!empty_fields_add(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, hide_media_name())) {
       adding_entry(FALSE)
       return()
     }
@@ -462,13 +471,14 @@ server <- function(input, output, session) {
       updateTextInput(session, "addCompanyNameModal", value = "")
       adding_entry(FALSE)
       addbutton_pressed(FALSE)
+      removeModal()
     } else {
       updateTextInput(session, "addMediaNameModal", value = "")
       updateTextInput(session, "addCompanyNameModal", value = "")
       adding_entry(FALSE)
       addbutton_pressed(FALSE)
     }
-  })
+  }) 
   
   observeEvent(input$deleteButton, {
     selected_rows <- input$media_list_rows_selected
@@ -492,16 +502,13 @@ server <- function(input, output, session) {
         cancelButtonText = "No",
         callbackR = function(confirm) {
           if (confirm) {
-            delete_entries(selected_ids)
+            delete_entries(selected_ids, logged_in_user())
             
             # Refresh the media list after deletion
             media_list(fetch_media_list())
-            filtered_medialist(NULL)  # Clear the filtered list
             output$media_list <- renderDT({
               datatable(media_list(), selection = "multiple")
             })
-          } else {
-            shinyalert("Error", "Deletion failed!", type = "error")
           }
         }
       )
@@ -539,32 +546,56 @@ server <- function(input, output, session) {
 })
 
   observeEvent(input$saveEditButton, {
-    removeModal()
-  
-    rec_id <- media_list()[selected_row(), "REC_ID"]
-    new_media_name <- input$editMediaName
-    new_company_name <- input$editCompanyName
-  
-    shinyalert(
-      title = "Confirm",
-      text = "Are you sure you want to save the changes?",
-      type = "warning",
-      showCancelButton = TRUE,
-      confirmButtonText = "Yes",
-      cancelButtonText = "No",
-      callbackR = function(confirm) {
-        if (confirm) {
-          save_edit(rec_id, new_media_name, new_company_name)
-          media_list(fetch_media_list())
-          filtered_medialist(NULL)  # Clear the filtered list
-          show_clear_filters(FALSE)
-          output$media_list <- renderDT({
-            datatable(media_list(), selection = "multiple")
-          })
-        }
+    selected_rows <- input$media_list_rows_selected
+    
+    if (length(selected_rows) == 0) {
+      shinyalert("No selection", "Please select one row to edit.", type = "warning")
+    } else if (length(selected_rows) > 1) {
+      shinyalert("Multiple selection", "Please select only one row to edit.", type = "warning")
+    } else {
+      selected_row(selected_rows)
+      editing_entry(TRUE)
+      
+      # Determine whether to use the filtered or unfiltered list
+      if (!is.null(filtered_medialist()) && nrow(filtered_medialist()) > 0) {
+        row_data <- filtered_medialist()[selected_rows, ]
+      } else {
+        row_data <- media_list()[selected_rows, ]
       }
-    )
+      
+      rec_id <- row_data$REC_ID
+      new_media_name <- input$editMediaName
+      new_company_name <- input$editCompanyName
+      
+      # Check if any field is empty
+      if (is.null(new_media_name) || new_media_name == "" || is.null(new_company_name) || new_company_name == "") {
+        shinyalert("Warning", "One or more empty fields are not allowed", type = "warning")
+        return(FALSE)
+      }
+      
+      shinyalert(
+        title = "Confirm",
+        text = "Are you sure you want to save the changes?",
+        type = "warning",
+        showCancelButton = TRUE,
+        confirmButtonText = "Yes",
+        cancelButtonText = "No",
+        callbackR = function(confirm) {
+          if (confirm) {
+            save_edit(rec_id, new_media_name, new_company_name)
+            media_list(fetch_media_list())
+            filtered_medialist(NULL)  # Clear the filtered list
+            show_clear_filters(FALSE)
+            output$media_list <- renderDT({
+              datatable(media_list(), selection = "multiple")
+            })
+            removeModal()  # Close the modal after successful save
+          }
+        }
+      )
+    }
   })
+  
   
   observeEvent(input$cancelEditButton, {
     removeModal()
@@ -591,4 +622,5 @@ server <- function(input, output, session) {
     selectRows(dataTableProxy("media_list"), NULL)
   })
 }
+
 
