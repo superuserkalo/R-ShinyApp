@@ -107,17 +107,24 @@ empty_fields_add <- function(category, subcategory, media_name, company_name, hi
   return(TRUE)
 }
 
-empty_fields_edit <- function(media_name, company_name, hide_media_name) {
+empty_fields_edit <- function(category, subcategory, media_name, company_name, hide_media_name) {
+  
+  # Check if both media name and company name are empty
+  if (!hide_media_name && (is.null(media_name) || media_name == "") && (is.null(company_name) || company_name == "")) {
+    shinyalert("Error", "Media Name and Company Name cannot both be empty", type = "error")
+    return(FALSE)
+  }
   
   if (!hide_media_name) {
     if (is.null(media_name) || media_name == "") {
-      return(list(valid = FALSE, message = "Media Name cannot be empty"))
+      shinyalert("Error", "Media Name must be filled out", type = "error")
+      return(FALSE)
     }
   }
   
   # Always check if company name is not empty
   if (is.null(company_name) || company_name == "") {
-    shinyalert(title = "Validation Error", text = "Company Name cannot be empty", type = "error")
+    shinyalert("Error", "Company Name must be filled out", type = "error")
     return(FALSE)
   }
   
@@ -571,7 +578,7 @@ server <- function(input, output, session) {
     } else {
       row_data <- media_list()[selected_rows, ]
     }
-  
+    
     hide_media_name(row_data$CATEGORY %in% c("OOH", "P4"))
     
     showModal(modalDialog(
@@ -584,14 +591,13 @@ server <- function(input, output, session) {
       footer = tagList(
         actionButton("saveEditButton", "Save"),
         actionButton("cancelEditButton", "Cancel")
-      )
-    ))
-  }
-})
+       )
+      ))
+    }
+  })
 
   observeEvent(input$saveEditButton, {
     selected_rows <- input$media_list_rows_selected
-    hide_media_name(row_data$CATEGORY %in% c("OOH", "P4"))
     
     if (length(selected_rows) == 0) {
       shinyalert("No selection", "Please select one row to edit.", type = "warning")
@@ -612,10 +618,8 @@ server <- function(input, output, session) {
       new_media_name <- input$editMediaName
       new_company_name <- input$editCompanyName
       
-      # Check if any field is empty
-      if (is.null(new_media_name) || new_media_name == "" || is.null(new_company_name) || new_company_name == "") {
-        shinyalert("Warning", "One or more empty fields are not allowed", type = "warning")
-        return(FALSE)
+      if (!empty_fields_edit(row_data$CATEGORY, row_data$SUBCATEGORY, new_media_name, new_company_name, hide_media_name())) {
+        return()
       }
       
       shinyalert(
@@ -640,7 +644,6 @@ server <- function(input, output, session) {
       )
     }
   })
-  
   
   observeEvent(input$cancelEditButton, {
     removeModal()
