@@ -138,40 +138,28 @@ duplicate_filter <- function(media_name, company_name, media_list_df) {
   lower_media_name <- tolower(media_name)
   lower_company_name <- tolower(company_name)
   
-  # Convert media list names to lowercase
-  media_list_df <- media_list_df %>%
-    mutate(lower_media_name = tolower(MEDIA_NAME),
-           lower_company_name = tolower(COMPANY_NAME))
+  # Convert media list names to lowercase and check for exact match
+  exact_duplicate <- media_list_df %>%
+    filter(
+      tolower(MEDIA_NAME) == lower_media_name &
+        tolower(COMPANY_NAME) == lower_company_name
+    )
   
-  # Check for similar entries
-  similar_entries <- media_list_df %>%
-    filter(lower_media_name == lower_media_name & lower_company_name == lower_company_name)
-  
-  if (nrow(similar_entries) > 0) {
-    similar_entry_text <- paste("Similar entry already exists:", 
-                                paste(similar_entries$MEDIA_NAME, similar_entries$COMPANY_NAME, sep = " - "), 
-                                collapse = "\n")
-    confirm_add <- FALSE  # Initialize confirm_add to FALSE
-    
-    shinyalert("Similar entry detected", 
-               paste("Did you mean:\n", similar_entry_text, "?", sep = ""), 
-               type = "warning",
-               showCancelButton = TRUE, 
-               confirmButtonText = "Add anyways", 
-               cancelButtonText = "Cancel",
-               callbackR = function(confirm) {
-                 confirm_add <<- confirm
-               })
-    
-    # Wait for the user to respond to the shinyalert
-    while (is.null(confirm_add)) {
-      Sys.sleep(0.1)
-    }
-    
-    return(confirm_add)
-  } else {
-    return(TRUE)
+  if (nrow(exact_duplicate) > 0) {
+    shinyalert(
+      "Duplicate Entry Detected",
+      paste0(
+        "An exact duplicate already exists in the database:\n\n",
+        "Media Name: ", exact_duplicate$MEDIA_NAME[1], "\n",
+        "Company Name: ", exact_duplicate$COMPANY_NAME[1], "\n\n",
+        "Please modify your entry or choose a different name."
+      ),
+      type = "error"
+    )
+    return(FALSE)
   }
+  
+  return(TRUE)  # No exact duplicate found
 }
 
 add_entry <- function(category, subcategory, media_name, company_name, has_addsubcategories, hide_media_name, username) {
