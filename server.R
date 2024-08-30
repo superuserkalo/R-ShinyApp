@@ -107,6 +107,24 @@ empty_fields_add <- function(category, subcategory, media_name, company_name, hi
   return(TRUE)
 }
 
+empty_fields_edit <- function(media_name, company_name, hide_media_name) {
+  
+  if (!hide_media_name) {
+    if (is.null(media_name) || media_name == "") {
+      return(list(valid = FALSE, message = "Media Name cannot be empty"))
+    }
+  }
+  
+  # Always check if company name is not empty
+  if (is.null(company_name) || company_name == "") {
+    shinyalert(title = "Validation Error", text = "Company Name cannot be empty", type = "error")
+    return(FALSE)
+  }
+  
+  return(list(valid = TRUE, message = ""))
+}
+
+
 fetch_media_list <- function() {
   tryCatch({
     conn <- oracledb$connect(user = DB_username, password = DB_password, dsn = DB_dsn)
@@ -133,33 +151,38 @@ fetch_media_list <- function() {
   })
 }
 
-duplicate_filter <- function(media_name, company_name, media_list_df) {
-  # Convert user input to lowercase
-  lower_media_name <- tolower(media_name)
-  lower_company_name <- tolower(company_name)
+duplicate_filter <- function(category, media_name, company_name, hide_media_name, has_addsubcategories, session) {
+  conn <- oracledb$connect(user = DB_username, password = DB_password, dsn = DB_dsn)
+  cursor <- conn$cursor()
   
-  # Convert media list names to lowercase and check for exact match
-  exact_duplicate <- media_list_df %>%
-    filter(
-      tolower(MEDIA_NAME) == lower_media_name &
-        tolower(COMPANY_NAME) == lower_company_name
-    )
+  # Start with a basic query that compares lower case values
+  query <- "SELECT COUNT(*) FROM MTG.MTG_MEDIA_LIST_TEST WHERE LOWER(COMPANY_NAME) = :company_name AND LOWER(CATEGORY) = :category"
+  params <- list(company_name = tolower(company_name), category = tolower(category))
   
-  if (nrow(exact_duplicate) > 0) {
-    shinyalert(
-      "Duplicate Entry Detected",
-      paste0(
-        "An exact duplicate already exists in the database:\n\n",
-        "Media Name: ", exact_duplicate$MEDIA_NAME[1], "\n",
-        "Company Name: ", exact_duplicate$COMPANY_NAME[1], "\n\n",
-        "Please modify your entry or choose a different name."
-      ),
-      type = "error"
-    )
-    return(FALSE)
+  # Add conditions based on input
+  if (!hide_media_name) {
+    query <- paste(query, "AND LOWER(MEDIA_NAME) = :media_name")
+    params$media_name <- tolower(media_name)
   }
   
-  return(TRUE)  # No exact duplicate found
+  if (has_addsubcategories) {
+    query <- paste(query, "AND LOWER(SUBCATEGORY) = :subcategory")
+    params$subcategory <- tolower(subcategory)
+  }
+  
+  # Execute the query
+  cursor$execute(query, params)
+  result <- as.integer(cursor$fetchone()[[1]])
+  cursor$close()
+  conn$close()
+  
+  # Check if a duplicate exists and alert the user
+  if (result > 0) {
+    shinyalert(title = "Duplicate entry found", text = "A similar entry already exists within the same category in the database.", type = "error")
+    return(TRUE)  # Duplicate exists
+  } else {
+    return(FALSE)  # No duplicate
+  }
 }
 
 add_entry <- function(category, subcategory, media_name, company_name, has_addsubcategories, hide_media_name, username) {
@@ -479,11 +502,8 @@ server <- function(input, output, session) {
       return()
     }
     
-    # Fetch the current media list
-    media_list_df <- fetch_media_list()
-    
     # Check for duplicates and similar entries
-    if (duplicate_filter(MEDIA_NAME, COMPANY_NAME, media_list_df)) {
+    if (!duplicate_filter(CATEGORY, MEDIA_NAME, COMPANY_NAME,hide_media_name(),has_addsubcategories())) {
       add_entry(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, has_addsubcategories(), hide_media_name(), logged_in_user())
       media_list(fetch_media_list())
       updateTextInput(session, "addMediaNameModal", value = "")
@@ -551,8 +571,7 @@ server <- function(input, output, session) {
     } else {
       row_data <- media_list()[selected_rows, ]
     }
-    
-    
+  
     hide_media_name(row_data$CATEGORY %in% c("OOH", "P4"))
     
     showModal(modalDialog(
@@ -572,6 +591,7 @@ server <- function(input, output, session) {
 
   observeEvent(input$saveEditButton, {
     selected_rows <- input$media_list_rows_selected
+    hide_media_name(row_data$CATEGORY %in% c("OOH", "P4"))
     
     if (length(selected_rows) == 0) {
       shinyalert("No selection", "Please select one row to edit.", type = "warning")
@@ -645,6 +665,17 @@ server <- function(input, output, session) {
 
   observeEvent(input$clearSelection, {
     selectRows(dataTableProxy("media_list"), NULL)
+  })
+
+observeEvent(input$logoutButton, {
+  logged_in(FALSE)         # Set logged_in to FALSE
+  logged_in_user(NULL)     # Clear the logged_in_user value
+  
+  updateTextInput(session, "usernameInput", value = "")
+  updateTextInput(session, "passInput", value = "")
+  
+  shinyalert("Logged out", "You have been logged out successfully.", type = "info")
+
   })
 }
 

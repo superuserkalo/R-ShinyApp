@@ -16,28 +16,22 @@ custom_theme <- bs_theme(
 )
 
 ui <- fluidPage(
-
-  conditionalPanel(
-    condition = "!output.is_logged_in",
-    fluidRow(
-      column(
-        width = 12,
-        offset =  2,
-        # Input section
-        card(
-          style = "display: flex; flex-direction: column; justify-content: center; align-items: center; align: center; width: 60%;",
-          textInput("usernameInput", "", placeholder = "Enter username"),
-          passwordInput("passInput", "", placeholder = "Enter password")
-          ),
-          # Button section
-        card(
-          style = "display: flex; flex-direction: column; justify-content: center; align-items: center; align: center; width: 60%;",
-          actionButton("loginAccount", label = "Login"),
-          actionButton("createAccount", label = "Create Account")
-          )
-        )
-      )
-  ),
+  conditionalPanel(condition = "!output.is_logged_in", fluidRow(column(
+    width = 12,
+    offset =  2,
+    # Input section
+    card(
+      style = "display: flex; flex-direction: column; justify-content: center; align-items: center; align: center; width: 60%;",
+      textInput("usernameInput", "", placeholder = "Enter username"),
+      passwordInput("passInput", "", placeholder = "Enter password")
+    ),
+    # Button section
+    card(
+      style = "display: flex; flex-direction: column; justify-content: center; align-items: center; align: center; width: 60%;",
+      actionButton("loginAccount", label = "Login", style = "margin-bottom: 10px;"),
+      actionButton("createAccount", label = "Create Account")
+    )
+  ))),
   
   conditionalPanel(
     condition = "output.is_logged_in",
@@ -45,49 +39,41 @@ ui <- fluidPage(
       title = "RTR",
       id = "navbar",
       
-      tabPanel("Home",
-               sidebarLayout(
-                 sidebarPanel(
-                   layout_column_wrap(
-                     width = 1,
-                     gap = "1rem",
-                     card(
-                       h4("Filter"),
-                       selectInput("category", "Category", choices = NULL),
-                       conditionalPanel(
-                         condition = "output.hasSubcategories",
-                         selectInput("subcategory", "Subcategory", choices = NULL)
-                       ),
-                       actionButton("filterButton", "Filter"),
-                       conditionalPanel(
-                         condition = "output.showClearFilters",
-                         actionButton("clearFilters", "Clear Filters")
-                       )
-                     ),
-                     card(
-                       h4("Management"),
-                        actionButton("addButton", "Add"),
-                        actionButton("editButton", "Edit"),
-                        actionButton("deleteButton", "Delete")
-                     ),
-                     conditionalPanel(
-                       condition = "output.rowsSelected",
-                       card(
-                        h4("Selected Rows"),
-                        textOutput("selectedRowsInfo"),
-                        actionButton("clearSelection", "Clear Selection")
-                       )
-                     )
-                   ),
-                   width = 3
-                 ),
-                 mainPanel(
-                   DTOutput("media_list")  # Output for media list
-                 )
-               )
+      tabPanel("Home", sidebarLayout(
+        sidebarPanel(
+          layout_column_wrap(
+            width = 1,
+            gap = "1rem",
+            card(
+              h4("Filter"),
+              selectInput("category", "Category", choices = NULL),
+              conditionalPanel(
+                condition = "output.hasSubcategories",
+                selectInput("subcategory", "Subcategory", choices = NULL)
+              ),
+              actionButton("filterButton", "Filter"),
+              conditionalPanel(condition = "output.showClearFilters", actionButton("clearFilters", "Clear Filters"))
+            ),
+            card(
+              h4("Management"),
+              actionButton("addButton", "Add"),
+              actionButton("editButton", "Edit"),
+              actionButton("deleteButton", "Delete")
+            ),
+            conditionalPanel(condition = "output.rowsSelected", card(
+              h4("Selected Rows"),
+              textOutput("selectedRowsInfo"),
+              actionButton("clearSelection", "Clear Selection")
+            )),
+            actionButton("logoutButton", "Logout", 
+                         style = "position: absolute; bottom: 25px; left: 20px;")
+          ),
+          width = 3
+        ),
+        mainPanel(DTOutput("media_list")  # Output for media list)
+        )),
+        theme = custom_theme
       )
     )
-),
-      # Loads custom theme
-  theme = custom_theme
-)
+  )
+)  
