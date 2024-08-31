@@ -16,27 +16,62 @@ custom_theme <- bs_theme(
 )
 
 ui <- fluidPage(
-  conditionalPanel(condition = "!output.is_logged_in", fluidRow(column(
-    width = 12,
-    offset =  2,
-    # Input section
-    card(
-      style = "display: flex; flex-direction: column; justify-content: center; align-items: center; align: center; width: 60%;",
-      textInput("usernameInput", "", placeholder = "Enter username"),
-      passwordInput("passInput", "", placeholder = "Enter password")
-    ),
-    # Button section
-    card(
-      style = "display: flex; flex-direction: column; justify-content: center; align-items: center; align: center; width: 60%;",
-      actionButton("loginAccount", label = "Login", style = "margin-bottom: 10px;"),
-      actionButton("createAccount", label = "Create Account")
+  theme = custom_theme,
+  tags$head(
+    tags$style(
+      HTML("
+        .centered-content {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          height: 100vh;
+        }
+        .rtr-image-login {
+          width: 20%;
+          height: auto;
+          margin-bottom: 20px;
+        }
+        #login-screen-card {
+          padding: 15px;
+          border-radius: 5px;
+          box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+          margin-bottom: 15px;
+          width: 42%;
+        }
+        .card .shiny-input-container {
+          margin-bottom: 10px; 
+        }
+        .shiny-input-container {
+          margin-bottom: 10px; 
+        }
+      ")
     )
-  ))),
+  ),
+  
+  conditionalPanel(
+    condition = "!output.is_logged_in",
+    fluidRow(
+      column(
+        width = 12,
+        class = "centered-content",
+        img(src = "company_image.png", class = "rtr-image-login"),
+        card(
+          id = "login-screen-card",
+          style = "display: flex; flex-direction: column; justify-content: center; align-items: center; align: center;",
+          textInput("usernameInput", "", placeholder = "Enter username"),
+          passwordInput("passInput", "", placeholder = "Enter password"),
+          actionButton("loginAccount", label = "Login"),
+          actionButton("createAccount", label = "Create Account")
+        )
+      )
+    )
+  ),
   
   conditionalPanel(
     condition = "output.is_logged_in",
     navbarPage(
-      title = "RTR",
+      title = img(src = "company_image.png", height = "50px"),
       id = "navbar",
       
       tabPanel("Home", sidebarLayout(
@@ -52,28 +87,29 @@ ui <- fluidPage(
                 selectInput("subcategory", "Subcategory", choices = NULL)
               ),
               actionButton("filterButton", "Filter"),
-              conditionalPanel(condition = "output.showClearFilters", actionButton("clearFilters", "Clear Filters"))
-            ),
-            card(
+              conditionalPanel(condition = "output.showClearFilters", actionButton("clearFilters", "Clear Filters")),
+              
               h4("Management"),
               actionButton("addButton", "Add"),
               actionButton("editButton", "Edit"),
-              actionButton("deleteButton", "Delete")
+              actionButton("deleteButton", "Delete"),
+
+              actionButton("logoutButton", "Logout", class = "logout-button",
+                           style = "position: absolute; bottom: -50px; left: 30%")
             ),
             conditionalPanel(condition = "output.rowsSelected", card(
               h4("Selected Rows"),
               textOutput("selectedRowsInfo"),
               actionButton("clearSelection", "Clear Selection")
-            )),
-            actionButton("logoutButton", "Logout", 
-                         style = "position: absolute; bottom: 25px; left: 20px;")
+            ))
           ),
           width = 3
         ),
         mainPanel(DTOutput("media_list")  # Output for media list)
-        )),
-        theme = custom_theme
+        )
       )
+      ),
+
     )
   )
-)  
+)

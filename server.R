@@ -1,5 +1,4 @@
 library(shiny)
-library(RSQLite)
 library(DBI)
 library(dplyr)
 library(dbplyr)
@@ -8,8 +7,8 @@ library(glue)
 library(shinyalert)
 library(reticulate)
 library(DT)
-library(fuzzyjoin)
 library(stringr)
+library(openxlsx)
 
 source("utils.R")
 
@@ -74,6 +73,18 @@ login <- function(username, password){
   return(TRUE)
 }
 
+trim_whitespace <- function(input_string) {
+  str_trim(input_string, side = "both")
+}   
+
+no_whitespaces <- function(input_string) {
+  if (str_detect(input_string, "\\s")) {
+    return(FALSE)
+  }else {
+    return(TRUE)
+  }
+}
+
 empty_fields <- function(username, password) {
   
   if (is.null(username) || username == "" || 
@@ -107,31 +118,6 @@ empty_fields_add <- function(category, subcategory, media_name, company_name, hi
   return(TRUE)
 }
 
-empty_fields_edit <- function(category, subcategory, media_name, company_name, hide_media_name) {
-  
-  # Check if both media name and company name are empty
-  if (!hide_media_name && (is.null(media_name) || media_name == "") && (is.null(company_name) || company_name == "")) {
-    shinyalert("Error", "Media Name and Company Name cannot both be empty", type = "error")
-    return(FALSE)
-  }
-  
-  if (!hide_media_name) {
-    if (is.null(media_name) || media_name == "") {
-      shinyalert("Error", "Media Name must be filled out", type = "error")
-      return(FALSE)
-    }
-  }
-  
-  # Always check if company name is not empty
-  if (is.null(company_name) || company_name == "") {
-    shinyalert("Error", "Company Name must be filled out", type = "error")
-    return(FALSE)
-  }
-  
-  return(list(valid = TRUE, message = ""))
-}
-
-
 fetch_media_list <- function() {
   tryCatch({
     conn <- oracledb$connect(user = DB_username, password = DB_password, dsn = DB_dsn)
@@ -158,13 +144,18 @@ fetch_media_list <- function() {
   })
 }
 
-duplicate_filter <- function(category, media_name, company_name, hide_media_name, has_addsubcategories, session) {
+duplicate_filter <- function(category, subcategory, media_name, company_name, hide_media_name, has_addsubcategories, editing_entry = FALSE, exclude_rec_id = NULL) {
   conn <- oracledb$connect(user = DB_username, password = DB_password, dsn = DB_dsn)
   cursor <- conn$cursor()
   
-  # Start with a basic query that compares lower case values
-  query <- "SELECT COUNT(*) FROM MTG.MTG_MEDIA_LIST_TEST WHERE LOWER(COMPANY_NAME) = :company_name AND LOWER(CATEGORY) = :category"
+  # Start with a basic query that compares lower case values and selects REC_ID
+  query <- "SELECT REC_ID FROM MTG.MTG_MEDIA_LIST_TEST WHERE LOWER(COMPANY_NAME) = :company_name AND LOWER(CATEGORY) = :category"
   params <- list(company_name = tolower(company_name), category = tolower(category))
+  
+  if (has_addsubcategories) {
+    query <- paste(query, "AND LOWER(SUBCATEGORY) = :subcategory")
+    params$subcategory <- tolower(subcategory)
+  }
   
   # Add conditions based on input
   if (!hide_media_name) {
@@ -172,20 +163,21 @@ duplicate_filter <- function(category, media_name, company_name, hide_media_name
     params$media_name <- tolower(media_name)
   }
   
-  if (has_addsubcategories) {
-    query <- paste(query, "AND LOWER(SUBCATEGORY) = :subcategory")
-    params$subcategory <- tolower(subcategory)
+  if (editing_entry && !is.null(exclude_rec_id)) {
+    query <- paste(query, "AND REC_ID != :exclude_rec_id")
+    params$exclude_rec_id <- exclude_rec_id
   }
-  
+
   # Execute the query
   cursor$execute(query, params)
   result <- as.integer(cursor$fetchone()[[1]])
   cursor$close()
   conn$close()
   
-  # Check if a duplicate exists and alert the user
-  if (result > 0) {
-    shinyalert(title = "Duplicate entry found", text = "A similar entry already exists within the same category in the database.", type = "error")
+  # Check if similar entries exist
+  if (length(result) > 0) {
+    similar_entries_rec_ids <- sapply(result, function(x) x[[1]])  # Extract the first element of each list
+    shinyalert(title = "Duplicate entry found", text = paste("A similar entry already exists! REC_ID(s):", paste(similar_entries_rec_ids, collapse = ", ")), type = "error")
     return(TRUE)  # Duplicate exists
   } else {
     return(FALSE)  # No duplicate
@@ -320,6 +312,8 @@ server <- function(input, output, session) {
   hide_media_name <- reactiveVal(FALSE)
   editing_entry <- reactiveVal(FALSE)
   selected_row <- reactiveVal(NULL)
+  selected_row_data <- reactiveVal(NULL)
+  file_type <- reactiveVal(NULL)
   
   output$rowsSelected <- reactive({
     length(input$media_list_rows_selected) > 0
@@ -366,40 +360,80 @@ server <- function(input, output, session) {
   })
   outputOptions(output, "editingEntry", suspendWhenHidden = FALSE)
   
+  output$downloadData <- downloadHandler(
+    filename = function() {
+      paste("media_list", switch(file_type(), "CSV" = "csv", "Excel" = "xlsx"), sep = ".")
+    },
+    content = function(file) {
+      if (file_type() == "CSV") {
+        write.csv(media_list(), file, row.names = FALSE)
+      } else if (file_type() == "Excel") {
+        openxlsx::write.xlsx(media_list(), file, rowNames = FALSE)
+      }
+    }
+  )
+  
+  output$downloadCSV <- downloadHandler(
+    filename = function() {
+      "media_list.csv"
+    },
+    content = function(file) {
+      file_type("CSV")
+      write.csv(media_list(), file, row.names = FALSE)
+    }
+  )
+  
+  output$downloadExcel <- downloadHandler(
+    filename = function() {
+      "media_list.xlsx"
+    },
+    content = function(file) {
+      file_type("Excel")
+      openxlsx::write.xlsx(media_list(), file, rowNames = FALSE)
+    }
+  )
+  
   observeEvent(input$createAccount, {
     username <- input$usernameInput
     password <- input$passInput
     
-    if (empty_fields(username,password)) {
-      account_creation(username,password)    
+    if (no_whitespaces(username) && no_whitespaces(username)) {
+      if (empty_fields(username,password)) {
+        account_creation(username,password)    
       
-      updateTextInput(session, "usernameInput", value = "")
-      updateTextInput(session, "passInput", value = "")
-    }  
-
+        updateTextInput(session, "usernameInput", value = "")
+        updateTextInput(session, "passInput", value = "")
+      }  
+    }else {
+      shinyalert(title = "Error",text = "No whitespaces allowed. Please remove spaces and try again.",type = "error")
+    }
   })
   
   observeEvent(input$loginAccount, {
     username <- input$usernameInput
     password <- input$passInput
     
-    if (empty_fields(username, password)) {
-      login_successful <- login(username,password)
-      if (login_successful){
-        shinyalert("Success", "Login successful!", type = "success")
-        logged_in(TRUE)
-        logged_in_user(username)
+    if (no_whitespaces(username) && no_whitespaces(username)) {
+      if (empty_fields(username, password)) {
+        login_successful <- login(username,password)
+        if (login_successful){
+          shinyalert("Success", "Login successful!", type = "success")
+          logged_in(TRUE)
+          logged_in_user(username)
         
-        media_list(fetch_media_list())
-        categories <- unique(media_list()$CATEGORY)
-        updateSelectInput(session, "category", choices = categories)
+          media_list(fetch_media_list())
+          categories <- unique(media_list()$CATEGORY)
+          updateSelectInput(session, "category", choices = categories)
 
-        output$media_list <- renderDT({
-          datatable(media_list(), selection = list(mode = 'multiple', target = 'row'))
-        })
+          output$media_list <- renderDT({
+            datatable(media_list(), selection = list(mode = 'multiple', target = 'row'))
+          })
+        }
       }
+    }else {
+      shinyalert(title = "Error",text = "No whitespaces allowed. Please remove spaces and try again.",type = "error")
     }
-})
+  })
   
   observeEvent(input$category, {
     
@@ -473,6 +507,20 @@ server <- function(input, output, session) {
         actionButton("cancelAddButtonModal", "Cancel")
       )
     ))
+    
+    # Ensure the subcategory is set correctly when the modal is shown
+    if (length(categories) > 0) {
+      media_list_val <- media_list()
+      subcategories <- unique(media_list_val$SUBCATEGORY[media_list_val$CATEGORY == categories[1]])
+      subcategories <- subcategories[!is.na(subcategories)]  # Filter out NA values
+      has_addsubcategories(length(subcategories) > 0)
+      
+      if (length(subcategories) > 0) {
+        updateSelectInput(session, "addSubcategoryModal", choices = subcategories, selected = subcategories[1])
+      } else {
+        updateSelectInput(session, "addSubcategoryModal", choices = NULL)
+      }
+    }
   })
   
   observeEvent(input$addCategoryModal, {
@@ -499,20 +547,24 @@ server <- function(input, output, session) {
   })
  
   observeEvent(input$saveAddButton, {
-    CATEGORY <- input$addCategoryModal
-    SUBCATEGORY <- input$addSubcategoryModal
-    MEDIA_NAME <- input$addMediaNameModal
-    COMPANY_NAME <- input$addCompanyNameModal
+    CATEGORY <- trim_whitespace(input$addCategoryModal)
+    SUBCATEGORY <- trim_whitespace(input$addSubcategoryModal)
+    MEDIA_NAME <- trim_whitespace(input$addMediaNameModal)
+    COMPANY_NAME <- trim_whitespace(input$addCompanyNameModal)
     
     if (!empty_fields_add(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, hide_media_name())) {
-      adding_entry(FALSE)
       return()
     }
     
     # Check for duplicates and similar entries
-    if (!duplicate_filter(CATEGORY, MEDIA_NAME, COMPANY_NAME,hide_media_name(),has_addsubcategories())) {
+    if (!duplicate_filter(CATEGORY,SUBCATEGORY, MEDIA_NAME, COMPANY_NAME,hide_media_name(),has_addsubcategories())) {
       add_entry(CATEGORY, SUBCATEGORY, MEDIA_NAME, COMPANY_NAME, has_addsubcategories(), hide_media_name(), logged_in_user())
+      filtered_medialist(NULL)  # Clear the filtered list
+      show_clear_filters(FALSE)
       media_list(fetch_media_list())
+      output$media_list <- renderDT({
+        datatable(media_list(), selection = "multiple")
+      })
       updateTextInput(session, "addMediaNameModal", value = "")
       updateTextInput(session, "addCompanyNameModal", value = "")
       adding_entry(FALSE)
@@ -552,6 +604,7 @@ server <- function(input, output, session) {
             
             # Refresh the media list after deletion
             media_list(fetch_media_list())
+            show_clear_filters(FALSE)
             output$media_list <- renderDT({
               datatable(media_list(), selection = "multiple")
             })
@@ -563,6 +616,7 @@ server <- function(input, output, session) {
 
   observeEvent(input$editButton, {
   selected_rows <- input$media_list_rows_selected
+  
   
   if (length(selected_rows) == 0) {
     shinyalert("No selection", "Please select one row to edit.", type = "warning")
@@ -579,8 +633,9 @@ server <- function(input, output, session) {
       row_data <- media_list()[selected_rows, ]
     }
     
+    selected_row_data(row_data)
     hide_media_name(row_data$CATEGORY %in% c("OOH", "P4"))
-    
+  
     showModal(modalDialog(
       title = "Edit Entry",
             conditionalPanel(
@@ -591,59 +646,48 @@ server <- function(input, output, session) {
       footer = tagList(
         actionButton("saveEditButton", "Save"),
         actionButton("cancelEditButton", "Cancel")
-       )
+        )
       ))
     }
   })
 
   observeEvent(input$saveEditButton, {
-    selected_rows <- input$media_list_rows_selected
+    row_data <- selected_row_data()
+    has_addsubcategories <- has_addsubcategories()
     
-    if (length(selected_rows) == 0) {
-      shinyalert("No selection", "Please select one row to edit.", type = "warning")
-    } else if (length(selected_rows) > 1) {
-      shinyalert("Multiple selection", "Please select only one row to edit.", type = "warning")
-    } else {
-      selected_row(selected_rows)
-      editing_entry(TRUE)
-      
-      # Determine whether to use the filtered or unfiltered list
-      if (!is.null(filtered_medialist()) && nrow(filtered_medialist()) > 0) {
-        row_data <- filtered_medialist()[selected_rows, ]
-      } else {
-        row_data <- media_list()[selected_rows, ]
-      }
-      
       rec_id <- row_data$REC_ID
-      new_media_name <- input$editMediaName
-      new_company_name <- input$editCompanyName
+      new_media_name <- trim_whitespace(input$editMediaName)
+      new_company_name <- (input$editCompanyName)
       
-      if (!empty_fields_edit(row_data$CATEGORY, row_data$SUBCATEGORY, new_media_name, new_company_name, hide_media_name())) {
+      # Check if any field is empty
+      if (!empty_fields_add(row_data$CATEGORY, row_data$SUBCATEGORY, new_media_name, new_company_name, hide_media_name())) {
         return()
       }
       
-      shinyalert(
-        title = "Confirm",
-        text = "Are you sure you want to save the changes?",
-        type = "warning",
-        showCancelButton = TRUE,
-        confirmButtonText = "Yes",
-        cancelButtonText = "No",
-        callbackR = function(confirm) {
-          if (confirm) {
-            save_edit(rec_id, new_media_name, new_company_name, logged_in_user())
-            media_list(fetch_media_list())
-            filtered_medialist(NULL)  # Clear the filtered list
-            show_clear_filters(FALSE)
-            output$media_list <- renderDT({
-              datatable(media_list(), selection = "multiple")
-            })
-            removeModal()  # Close the modal after successful save
+      if (!duplicate_filter(row_data$CATEGORY, row_data$SUBCATEGORY, new_media_name, new_company_name, hide_media_name(), has_addsubcategories(), editing_entry = TRUE, exclude_rec_id = rec_id)) {
+        shinyalert(
+          title = "Confirm",
+          text = "Are you sure you want to save the changes?",
+          type = "warning",
+          showCancelButton = TRUE,
+          confirmButtonText = "Yes",
+          cancelButtonText = "No",
+          callbackR = function(confirm) {
+            if (confirm) {
+              save_edit(rec_id, new_media_name, new_company_name, logged_in_user())
+              media_list(fetch_media_list())
+              filtered_medialist(NULL)  # Clear the filtered list
+              show_clear_filters(FALSE)
+              output$media_list <- renderDT({
+                datatable(media_list(), selection = "multiple")
+              })
+              removeModal()  # Close the modal after successful save
+            }
           }
-        }
-      )
-    }
-  })
+        )
+      }
+    })
+  
   
   observeEvent(input$cancelEditButton, {
     removeModal()
@@ -670,15 +714,57 @@ server <- function(input, output, session) {
     selectRows(dataTableProxy("media_list"), NULL)
   })
 
-observeEvent(input$logoutButton, {
-  logged_in(FALSE)         # Set logged_in to FALSE
-  logged_in_user(NULL)     # Clear the logged_in_user value
+  observeEvent(input$logoutButton, {
+    logged_in(FALSE)         # Set logged_in to FALSE
+    logged_in_user(NULL)     # Clear the logged_in_user value
   
-  updateTextInput(session, "usernameInput", value = "")
-  updateTextInput(session, "passInput", value = "")
+    updateTextInput(session, "usernameInput", value = "")
+    updateTextInput(session, "passInput", value = "")
   
-  shinyalert("Logged out", "You have been logged out successfully.", type = "info")
+    shinyalert("Logged out", "You have been logged out successfully.", type = "info")
 
+  })
+  
+  observeEvent(input$downloadButton, {
+    showModal(modalDialog(
+      title = "Download Data",
+      "Choose the file format:",
+      footer = tagList(
+        actionButton("downloadCSV", "CSV", style = "margin-left: 5px;"),
+        actionButton("downloadExcel", "Excel"),
+        modalButton("Cancel")
+      )
+    ))
+  })
+  
+  observeEvent(input$downloadCSV, {
+    file_type("CSV")
+    removeModal()
+    output$downloadData <- downloadHandler(
+      filename = function() {
+        "media_list.csv"
+      },
+      content = function(file) {
+        write.csv(media_list(), file, row.names = FALSE)
+      }
+    )
+    outputOptions(output, "downloadData", suspendWhenHidden = FALSE)
+    session$sendCustomMessage(type = "shiny-download", message = list(id = "downloadData"))
+  })
+  
+  observeEvent(input$downloadExcel, {
+    file_type("Excel")
+    removeModal()
+    output$downloadData <- downloadHandler(
+      filename = function() {
+        "media_list.xlsx"
+      },
+      content = function(file) {
+        openxlsx::write.xlsx(media_list(), file, rowNames = FALSE)
+      }
+    )
+    outputOptions(output, "downloadData", suspendWhenHidden = FALSE)
+    session$sendCustomMessage(type = "shiny-download", message = list(id = "downloadData"))
   })
 }
 
