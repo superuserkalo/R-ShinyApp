@@ -1,3 +1,5 @@
+PROPER README COMING SOON
+
 RTR Internal Tool for Modifying and Managing Large Data
 
 Developed by Kaloyan Gantchev and Thorsten Kain
