@@ -14,10 +14,6 @@ Features:
   Scalability: Handle datasets of all sizes, from small to massive.
   Performance: Optimized for fast processing of large data.
 
-License:
-
-This project is licensed under the MIT License. See the LICENSE file for details.
-
 Acknowledgments:
 
 Special thanks to our Mentor Matjaz Kovse an amazing person to learn from and work with.
