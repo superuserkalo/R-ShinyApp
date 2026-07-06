@@ -1,7 +1,7 @@
 PROPER README COMING SOON
 The Nature of this tool is very proprietary so there is not alot of public use for it. 
 
-RTR Internal Tool for Modifying and Managing Large Data
+Internal Tool for Modifying and Managing Large Data
 
 Developed by Kaloyan Gantchev and Thorsten Kain
 
